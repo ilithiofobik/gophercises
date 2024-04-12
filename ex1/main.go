@@ -1,35 +1,32 @@
 package main
 
 import (
-	"fmt"
-	"flag"
 	"encoding/csv"
-	"os"
+	"flag"
+	"fmt"
 	"log"
-	"time"
-	"strings"
 	"math/rand"
+	"os"
+	"strings"
+	"time"
 )
 
-func normalizeString(s string) string {
-	return strings.TrimSpace(strings.ToLower(s))
+func normalizeString(s *string) string {
+	return strings.TrimSpace(strings.ToLower(*s))
 }
 
-func timer(seconds int, done chan bool) {
-	time.Sleep(time.Duration(seconds) * time.Second)
-	done <- true
+func sameString(s1, s2 *string) bool {
+	return strings.Compare(normalizeString(s1), normalizeString(s2)) == 0
 }
 
-func quizzer(data [][]string, done chan bool, points* int) {
-	for i, line := range data {
-		question, answer := line[0], line[1]
-		
-		fmt.Printf("Question %d: %s\n", i, question)
+func quizzer(problems []Problem, done chan bool, points *int) {
+	var response string
 
-		var response string
+	for i, p := range problems {
+		fmt.Printf("Question %d: %s\n", i+1, p.question)
 		fmt.Scanf("%s\n", &response)
 
-		if normalizeString(response) == normalizeString(answer) {
+		if sameString(&response, &p.answer) {
 			*points++
 		}
 	}
@@ -37,16 +34,25 @@ func quizzer(data [][]string, done chan bool, points* int) {
 	done <- true
 }
 
-func main() {
-	filename := flag.String("filename", "problems.csv", "a csv file in the format of 'question,answer'")
-	timeLimit := flag.Int("timelimit", 30, "the time limit for the quiz in seconds")
-	shuffle := flag.Bool("shuffle", false, "shuffle the quiz questions")
+type Problem struct {
+	question string
+	answer   string
+}
 
-	flag.Parse()
+func parseLines(lines [][]string) []Problem {
+	ret := make([]Problem, len(lines))
 
-	fmt.Printf("Filename: %s\n", *filename)
-	fmt.Printf("Time Limit: %d\n", *timeLimit)
+	for i, line := range lines {
+		ret[i] = Problem{
+			question: line[0],
+			answer:   line[1],
+		}
+	}
 
+	return ret
+}
+
+func readData(filename *string) [][]string {
 	file, err := os.Open(*filename)
 
 	if err != nil {
@@ -61,18 +67,38 @@ func main() {
 		log.Fatal(err)
 	}
 
+	return data
+}
+
+func main() {
+	filename := flag.String("filename", "problems.csv", "a csv file in the format of 'question,answer'")
+	timeLimit := flag.Int("timelimit", 30, "the time limit for the quiz in seconds")
+	shuffle := flag.Bool("shuffle", false, "shuffle the quiz questions")
+	flag.Parse()
+
+	fmt.Printf("Filename: %s\n", *filename)
+	fmt.Printf("Time Limit: %d\n", *timeLimit)
+
+	data := readData(filename)
+	problems := parseLines(data)
+
 	if *shuffle {
 		rand.Seed(time.Now().UnixNano())
-		rand.Shuffle(len(data), func(i, j int) { data[i], data[j] = data[j], data[i] })
+		rand.Shuffle(len(problems), func(i, j int) { problems[i], problems[j] = problems[j], problems[i] })
 	}
 
 	done := make(chan bool)
 	points := 0
 
-	go timer(*timeLimit, done)
-	go quizzer(data, done, &points)
+	timer := time.NewTimer(time.Duration(*timeLimit) * time.Second)
+	go quizzer(problems, done, &points)
 
-	<- done
+	select {
+	case <-done:
+		break
+	case <-timer.C:
+		break
+	}
 
-	fmt.Printf("You scored %d out of %d\n", points, len(data))
+	fmt.Printf("You scored %d out of %d\n", points, len(problems))
 }
